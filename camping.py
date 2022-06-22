@@ -3,12 +3,13 @@
 
 import json
 import logging
-import sys
+
 from collections import defaultdict
 from datetime import datetime, timedelta
 from itertools import count, groupby
 
 from dateutil import rrule
+from discord_webhook import DiscordWebhook
 
 from clients.recreation_client import RecreationClient
 from enums.date_format import DateFormat
@@ -24,6 +25,7 @@ sh = logging.StreamHandler()
 sh.setFormatter(log_formatter)
 LOG.addHandler(sh)
 
+currentdate = datetime.now()
 
 def get_park_information(
     park_id, start_date, end_date, campsite_type=None, campsite_ids=()
@@ -263,7 +265,25 @@ def generate_json_output(info_by_park_id):
     return json.dumps(availabilities_by_park_id), has_availabilities
 
 
-def main(parks, json_output=False):
+def generate_discord_output(info_by_park_id):
+     out = ""
+     has_availabilities = False
+     for park_id, info in info_by_park_id.items():
+         current, maximum, _, park_name = info
+         if current:
+             has_availabilities = True
+             out += "{emoji} [{park_name}](https://www.recreation.gov/camping/campgrounds/{park_id}): {current} site(s) available out of {maximum} site(s)\n".format(
+                 emoji=Emoji.SUCCESS.value,
+                 park_name=park_name,
+                 park_id=park_id,
+                 current=current,
+                 maximum=maximum,
+             )
+
+     return out, has_availabilities
+
+
+def main(parks, json_output=False, discord_webhook_url=""):
     info_by_park_id = {}
     for park_id in parks:
         info_by_park_id[park_id] = check_park(
@@ -274,6 +294,15 @@ def main(parks, json_output=False):
             args.campsite_ids,
             nights=args.nights,
         )
+
+    if discord_webhook_url != "":
+         content, has_availabilities = generate_discord_output(info_by_park_id)
+         if has_availabilities:
+             webhook = DiscordWebhook(url=discord_webhook_url, content=content)
+             response = webhook.execute()
+             print(response)
+         else:
+             print("No campsites found; not issuing Discord webhook request")
 
     if json_output:
         output, has_availabilities = generate_json_output(info_by_park_id)
@@ -295,4 +324,11 @@ if __name__ == "__main__":
     if args.debug:
         LOG.setLevel(logging.DEBUG)
 
-    main(args.parks, json_output=args.json_output)
+    main(
+         args.parks,
+         json_output=args.json_output,
+         discord_webhook_url=args.discord_webhook,
+     )
+
+print("\nTime of Search:")
+print(currentdate)
